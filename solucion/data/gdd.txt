@@ -1,0 +1,34 @@
+# Game Design Document (GDD) - Proyecto 'PixelForge Legends' (Versión 2.1)
+
+## 1. Visión General del Proyecto
+'PixelForge Legends' es un juego de rol de acción (ARPG) en 2.5D ambientado en un mundo de fantasía oscura llamado Aethelgard. El jugador asume el rol de un héroe personalizable que debe purgar la corrupción que asola la tierra. El juego se enfoca en combates ágiles, progresión profunda de habilidades y exploración de mazmorras procedurales.
+
+## 2. Mecánicas Centrales de Jugabilidad
+### 2.1 Movimiento y Navegación
+- Caminar/Correr: El personaje se mueve a velocidad base (caminar) y puede correr usando stamina.
+- Salto y Doble Salto: Capacidad de saltar obstáculos. El doble salto se desbloquea en el Nivel 5. La animación de salto tiene una duración de 0.5s y consume 10 de Stamina.
+- Esquivar (Dash): Movimiento evasivo con frame de invulnerabilidad (i-frames) durante los primeros 0.2s. Enfriamiento de 2 segundos.
+
+### 2.2 Sistema de Combate
+- Ataque Básico: Secuencia de 3 golpes. El tercer golpe rompe defensas débiles.
+- Bloqueo y Parrying: Mantener el escudo bloquea daño frontal. Si se bloquea justo antes del impacto (ventana de 0.15s), se realiza un Parry que aturde al enemigo por 2s.
+- Habilidades Activas:
+  - 'Corte Ígneo': Daño en área frente al jugador. Costo: 20 Maná. Cooldown: 8s. Aplica estado 'Quemadura'.
+  - 'Barrera Refractiva': Escudo que absorbe hasta 150 puntos de daño durante 5s. Costo: 35 Maná. Cooldown: 15s.
+  - 'Salto Sísmico': El jugador salta y golpea el suelo. Daño masivo. Costo: 50 Maná. Cooldown: 25s.
+
+### 2.3 Máquina de Estados del Jugador
+El jugador sólo puede estar en un estado principal a la vez: IDLE, RUNNING, JUMPING, FALLING, ATTACKING, DASHING, HIT_STUN, DEAD.
+Reglas críticas: 
+- No se puede iniciar un ataque si se está en DASHING.
+- Si se presiona Salto y Ataque exactamente al mismo tiempo (mismo frame), el sistema debe priorizar el SALTO e ignorar el ataque para evitar un 'lock' de animación, según diseño. 
+
+## 3. Enemigos y Comportamiento de IA
+### 3.1 Slime Corrupto (Enemigo Básico)
+- Comportamiento: Persigue al jugador si está en un rango de 10 unidades. Ataca saltando. Débil al Fuego.
+### 3.2 Golem de Basalto (Miniboss)
+- Comportamiento: Lento. Ataques de área inbloqueables (requieren Dash). Inmune a cortes básicos, requiere daño contundente o magia.
+
+## 4. Progresión y Economía
+- Moneda principal: 'Esquirlas de Éter'. Se usan para mejorar equipo en la Forja.
+- Curva de nivel: Experiencia base para nivel 2 = 1000 XP. Aumenta un 1.5x exponencialmente por nivel.
