@@ -4,10 +4,10 @@
 # PASO 2 — API MODERNA (LangChain 0.3.x / LCEL)
 #
 # Herramientas implementadas:
-#   1. consultar_GDD      → RAG semántico sobre el Game Design Document
-#   2. consultar_codigo   → RAG semántico sobre la Guía de Estándares de Código
-#   3. consultar_bugs     → Consulta exacta sobre el CSV de Jira (Pandas Agent)
-#   4. consultar_balance  → Consulta exacta sobre el CSV de Balance (Pandas Agent)
+#   1. consultar_GDD      -> RAG semántico sobre el Game Design Document
+#   2. consultar_codigo   -> RAG semántico sobre la Guía de Estándares de Código
+#   3. consultar_bugs     -> Consulta exacta sobre el CSV de Jira (Pandas Agent)
+#   4. consultar_balance  -> Consulta exacta sobre el CSV de Balance (Pandas Agent)
 #
 # API utilizada: create_retrieval_chain + create_stuff_documents_chain (LCEL)
 # La cadena de recuperación antigua (deprecada en 0.3.x) fue reemplazada
@@ -28,7 +28,18 @@ from langchain_community.document_loaders import TextLoader
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_experimental.agents.agent_toolkits import create_pandas_dataframe_agent
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI
+from langchain_community.embeddings import HuggingFaceEmbeddings
+
+# Soporte Groq (gratis) — importacion opcional
+try:
+    from langchain_groq import ChatGroq
+    _GROQ_DISPONIBLE = True
+except ImportError:
+    _GROQ_DISPONIBLE = False
+
+# Modelo de embeddings gratuito (corre local, sin API key)
+_EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Cargar variables de entorno desde .env al importar el módulo
@@ -112,8 +123,8 @@ def _crear_retriever_faiss(path_txt: str, nombre: str, llm: ChatOpenAI):
     Construye una cadena de recuperación RAG para un archivo de texto.
 
     Pipeline LCEL (LangChain 0.3.x):
-        TextLoader → RecursiveCharacterTextSplitter → OpenAIEmbeddings
-        → FAISS → retriever → create_stuff_documents_chain → create_retrieval_chain
+        TextLoader -> RecursiveCharacterTextSplitter -> OpenAIEmbeddings
+        -> FAISS -> retriever -> create_stuff_documents_chain -> create_retrieval_chain
 
     Parámetros de chunking:
         chunk_size=500:    fragmentos pequeños = mayor precisión semántica
@@ -131,7 +142,7 @@ def _crear_retriever_faiss(path_txt: str, nombre: str, llm: ChatOpenAI):
     Returns:
         Cadena LCEL lista para invocar con {"input": "pregunta"}
     """
-    print(f"  → Indexando '{nombre}'...")
+    print(f"  -> Indexando '{nombre}'...")
 
     loader = TextLoader(path_txt, encoding="utf-8")
     docs = loader.load()
@@ -145,7 +156,13 @@ def _crear_retriever_faiss(path_txt: str, nombre: str, llm: ChatOpenAI):
     chunks = splitter.split_documents(docs)
     print(f"     {len(chunks)} chunks generados")
 
-    embeddings = OpenAIEmbeddings()
+    # Embeddings gratuitos — corren localmente sin API key
+    # Modelo all-MiniLM-L6-v2: 90MB, excelente calidad para documentos cortos
+    embeddings = HuggingFaceEmbeddings(
+        model_name=_EMBEDDING_MODEL,
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": True},
+    )
     vectorstore = FAISS.from_documents(chunks, embeddings)
     retriever = vectorstore.as_retriever(
         search_type="similarity",
@@ -196,7 +213,7 @@ def _crear_agente_pandas(df: pd.DataFrame, nombre: str, llm: ChatOpenAI):
     Returns:
         Agente Pandas listo para usar como backend de una Tool
     """
-    print(f"  → Inicializando agente Pandas '{nombre}'...")
+    print(f"  -> Inicializando agente Pandas '{nombre}'...")
     agente = create_pandas_dataframe_agent(
         llm=llm,
         df=df,
@@ -220,8 +237,8 @@ def build_tools(cadena_gdd, cadena_codigo, agente_bugs, agente_balance) -> List[
     - "USAR CUANDO:" guía al LLM sobre qué tipo de consulta activa esta tool
     - Incluye ejemplos de consultas válidas para que el LLM aprenda por analogía
     - "NO usar para:" evita que el LLM elija la tool equivocada
-    - Tools RAG (GDD, código): semánticas → texto libre, preguntas abiertas
-    - Tools Pandas (bugs, balance): exactas → datos numéricos o de estado
+    - Tools RAG (GDD, código): semánticas -> texto libre, preguntas abiertas
+    - Tools Pandas (bugs, balance): exactas -> datos numéricos o de estado
 
     Args:
         cadena_gdd:      cadena LCEL del GDD (create_retrieval_chain)
@@ -341,16 +358,32 @@ def build_tools_desde_datos(verbose: bool = True) -> List[Tool]:
         EnvironmentError: OPENAI_API_KEY no configurada o es el valor template
         FileNotFoundError: algún archivo de datos no existe en data/
     """
-    # --- Validación temprana de la API key ---
-    api_key = os.getenv("OPENAI_API_KEY", "")
-    if not api_key or api_key.startswith("sk-..."):
-        raise EnvironmentError(
-            "OPENAI_API_KEY no está configurada.\n"
-            "Pasos:\n"
-            "  1. Copia .env.example como .env\n"
-            "  2. Abre .env y reemplaza 'sk-...' con tu clave real de OpenAI\n"
-            "  3. Guarda el archivo y vuelve a ejecutar"
-        )
+    # --- Validación API key segun proveedor (Groq o OpenAI) ---
+    proveedor = os.getenv("LLM_PROVIDER", "openai").lower()
+
+    if proveedor == "groq":
+        api_key = os.getenv("GROQ_API_KEY", "")
+        if not api_key:
+            raise EnvironmentError(
+                "GROQ_API_KEY no configurada.\n"
+                "Registrate gratis en console.groq.com y pon tu key en .env:"
+                "  GROQ_API_KEY=gsk_..."
+            )
+        if not _GROQ_DISPONIBLE:
+            raise EnvironmentError(
+                "langchain-groq no instalado. Ejecuta:\n"
+                "  venv\\Scripts\\pip install langchain-groq==0.2.3"
+            )
+    else:
+        api_key = os.getenv("OPENAI_API_KEY", "")
+        if not api_key or api_key.startswith("sk-..."):
+            raise EnvironmentError(
+                "OPENAI_API_KEY no configurada.\n"
+                "Pasos:\n"
+                "  1. Copia .env.example como .env\n"
+                "  2. Abre .env y reemplaza 'sk-...' con tu clave real de OpenAI\n"
+                "  3. Guarda el archivo y vuelve a ejecutar"
+            )
 
     # --- Validación temprana de archivos de datos ---
     archivos_requeridos = {
@@ -369,14 +402,18 @@ def build_tools_desde_datos(verbose: bool = True) -> List[Tool]:
 
     if verbose:
         print("\n[Tools] Inicializando motor LLM...")
-        print(f"  Modelo: {os.getenv('LLM_MODEL', 'gpt-4o-mini')}")
+        print(f"  Proveedor: {proveedor.upper()}")
+        print(f"  Modelo: {os.getenv('LLM_MODEL', 'openai/gpt-oss-120b' if proveedor == 'groq' else 'gpt-4o-mini')}")
+        print(f"  Embeddings: HuggingFace/{_EMBEDDING_MODEL} (gratuito, local)")
         print(f"  Temperatura: 0 (determinista)")
 
-    llm = ChatOpenAI(
-        temperature=0,
-        model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
-        api_key=api_key,
-    )
+    if proveedor == "groq":
+        modelo = os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
+        llm = ChatOpenAI(temperature=0, model=modelo, api_key=api_key,
+                         base_url="https://api.groq.com/openai/v1")
+    else:
+        modelo = os.getenv("LLM_MODEL", "gpt-4o-mini")
+        llm = ChatOpenAI(temperature=0, model=modelo, api_key=api_key)
 
     if verbose:
         print("\n[Tools] Construyendo cadenas RAG (FAISS + LCEL)...")

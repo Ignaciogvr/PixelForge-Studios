@@ -1,4 +1,4 @@
-# ================================================================
+﻿# ================================================================
 # memory.py — Sistema de memoria DUAL del agente PixelForge EP2
 # ================================================================
 # PASO 3 COMPLETADO
@@ -7,16 +7,16 @@
 # la memoria humana:
 #
 #   TIPO 1 — Memoria de Conversación (MemorySaver de LangGraph)
-#   ─────────────────────────────────────────────────────────────
+#   -------------------------------------------------------------
 #   • Guarda el historial de mensajes de la sesión actual.
 #   • Permite al agente recordar lo que dijo el usuario hace 5 turnos.
-#   • Implementada con MemorySaver de LangGraph → se conecta directamente
+#   • Implementada con MemorySaver de LangGraph -> se conecta directamente
 #     al grafo de estados del agente en Paso 4.
 #   • Se persiste automáticamente en RAM mientras el proceso esté activo.
 #   • Al cerrar el script, se pierde (no hay BD externa).
 #
 #   TIPO 2 — Memoria Semántica / Vectorial (FAISS)
-#   ─────────────────────────────────────────────────────────────
+#   -------------------------------------------------------------
 #   • Indexa los documentos internos de PixelForge (GDD, código).
 #   • Permite recuperar los fragmentos más relevantes por similitud semántica.
 #   • El índice FAISS se guarda en disco (faiss_index/).
@@ -37,7 +37,7 @@ from typing import List, Optional
 from dotenv import load_dotenv
 from langchain_community.document_loaders import TextLoader
 from langchain_community.vectorstores import FAISS
-from langchain_openai import OpenAIEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -109,10 +109,10 @@ def crear_memoria_semantica(
     Crea o carga el índice FAISS para memoria semántica (RAG).
 
     Flujo de decisión:
-    ┌─────────────────────────────────────────────────┐
+    ┌-------------------------------------------------┐
     │ ¿Existe faiss_index/pixelforge_ep2/ en disco?   │
     │ Y ¿force_rebuild es False?                      │
-    └─────────┬───────────────────┬───────────────────┘
+    └---------┬-------------------┬-------------------┘
               │ SÍ                │ NO
               ▼                   ▼
         Carga el índice      Construye el índice:
@@ -155,14 +155,19 @@ def crear_memoria_semantica(
     index_path = os.path.join(FAISS_INDEX_DIR, FAISS_INDEX_NAME)
     index_exists = os.path.exists(index_path)
 
-    embeddings = OpenAIEmbeddings()
+    # Embeddings gratuitos — corren localmente sin API key
+    embeddings = HuggingFaceEmbeddings(
+        model_name=os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": True},
+    )
 
-    # ── CASO A: Cargar índice existente ─────────────────────────────────────
+    # -- CASO A: Cargar índice existente -------------------------------------
     if index_exists and not force_rebuild:
         logger.info(
             f"[Memory] Cargando índice FAISS desde disco: {index_path}"
         )
-        print(f"  → Cargando índice FAISS desde disco (sin regenerar embeddings)...")
+        print(f"  -> Cargando índice FAISS desde disco (sin regenerar embeddings)...")
         vectorstore = FAISS.load_local(
             folder_path=index_path,
             embeddings=embeddings,
@@ -172,11 +177,11 @@ def crear_memoria_semantica(
         print(f"     Índice cargado: {n_docs} vectores")
         logger.info(f"[Memory] Índice cargado: {n_docs} vectores")
 
-    # ── CASO B: Construir índice desde cero ─────────────────────────────────
+    # -- CASO B: Construir índice desde cero ---------------------------------
     else:
         motivo = "force_rebuild=True" if force_rebuild else "índice no existe en disco"
         logger.info(f"[Memory] Construyendo índice FAISS ({motivo})...")
-        print(f"  → Construyendo índice FAISS ({motivo})...")
+        print(f"  -> Construyendo índice FAISS ({motivo})...")
 
         # 1. Cargar documentos
         todos_los_docs = []
@@ -212,7 +217,7 @@ def crear_memoria_semantica(
         print(f"     Índice guardado en: {index_path} ({n_docs} vectores)")
         logger.info(f"[Memory] Índice guardado: {index_path} ({n_docs} vectores)")
 
-    # ── Configurar y retornar el retriever ──────────────────────────────────
+    # -- Configurar y retornar el retriever ----------------------------------
     retriever = vectorstore.as_retriever(
         search_type="similarity",
         search_kwargs={"k": DEFAULT_K},
@@ -266,17 +271,17 @@ class SistemaMemoriaDual:
         Returns:
             SistemaMemoriaDual con ambas memorias inicializadas
         """
-        print("\n[Memory] ─── Inicializando Sistema de Memoria Dual ───")
+        print("\n[Memory] --- Inicializando Sistema de Memoria Dual ---")
 
         # Tipo 1: conversación
         print("\n[Memory] Tipo 1 — Memoria de Conversación:")
         conversacion = crear_memoria_conversacion()
-        print("  ✓ MemorySaver activo (historial en RAM)")
+        print("  OK MemorySaver activo (historial en RAM)")
 
         # Tipo 2: semántica
         print("\n[Memory] Tipo 2 — Memoria Semántica (FAISS):")
         semantica = crear_memoria_semantica(paths_documentos, force_rebuild)
-        print("  ✓ Retriever FAISS listo")
+        print("  OK Retriever FAISS listo")
 
         stats = {
             "n_documentos_indexados": len(paths_documentos),
@@ -286,7 +291,7 @@ class SistemaMemoriaDual:
             "faiss_index_path":       os.path.join(FAISS_INDEX_DIR, FAISS_INDEX_NAME),
         }
 
-        print("\n[Memory] ✅ Sistema de Memoria Dual inicializado correctamente")
+        print("\n[Memory] OK Sistema de Memoria Dual inicializado correctamente")
         print(f"  Documentos indexados: {len(paths_documentos)}")
         print(f"  Chunk size / overlap: {DEFAULT_CHUNK_SIZE} / {DEFAULT_CHUNK_OVERLAP}")
         print(f"  Retriever k:          {DEFAULT_K}")
