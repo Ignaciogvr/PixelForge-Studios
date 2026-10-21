@@ -39,6 +39,13 @@ from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
+# Soporte para Groq (gratis) — se activa con LLM_PROVIDER=groq en el .env
+try:
+    from langchain_groq import ChatGroq
+    _GROQ_DISPONIBLE = True
+except ImportError:
+    _GROQ_DISPONIBLE = False
+
 # Importar los módulos EP2 del mismo paquete
 from tools import build_tools_desde_datos
 from memory import SistemaMemoriaDual, FAISS_INDEX_DIR
@@ -66,7 +73,8 @@ logger = logging.getLogger("pixelforge.agent")
 # Parámetros del agente — leídos del .env con defaults robustos
 # ----------------------------------------------------------------
 MAX_ITERATIONS = int(os.getenv("AGENT_MAX_ITERATIONS", "10"))
-LLM_MODEL      = os.getenv("LLM_MODEL", "gpt-4o-mini")
+LLM_PROVIDER   = os.getenv("LLM_PROVIDER", "openai").lower()  # "openai" o "groq"
+LLM_MODEL      = os.getenv("LLM_MODEL", "gpt-4o-mini")        # gpt-4o-mini o llama-3.3-70b-versatile
 LLM_TEMP       = float(os.getenv("LLM_TEMPERATURE", "0"))
 
 # ----------------------------------------------------------------
@@ -159,24 +167,53 @@ def construir_agente(force_rebuild_faiss: bool = False) -> dict:
     logger.info("  PixelForge EP2 — Construyendo agente ReAct")
     logger.info("=" * 55)
 
-    # ── 1. Validar API key ───────────────────────────────────────────────────
-    api_key = os.getenv("OPENAI_API_KEY", "")
-    if not api_key or api_key.startswith("sk-..."):
-        raise EnvironmentError(
-            "OPENAI_API_KEY no configurada.\n"
-            "Pasos:\n"
-            "  1. Copia .env.example como .env\n"
-            "  2. Pon tu clave real de OpenAI\n"
-            "  3. Vuelve a ejecutar"
-        )
+    # ── 1. Validar API key (Groq o OpenAI segun LLM_PROVIDER) ──────────────
+    if LLM_PROVIDER == "groq":
+        api_key = os.getenv("GROQ_API_KEY", "")
+        if not api_key:
+            raise EnvironmentError(
+                "GROQ_API_KEY no configurada.\n"
+                "Pasos:\n"
+                "  1. Registrate GRATIS en console.groq.com\n"
+                "  2. Crea una API Key y copiala\n"
+                "  3. En .env pon: GROQ_API_KEY=gsk_...\n"
+                "  4. Tambien pon: LLM_PROVIDER=groq\n"
+                "  5. Vuelve a ejecutar"
+            )
+        if not _GROQ_DISPONIBLE:
+            raise EnvironmentError(
+                "langchain-groq no instalado.\n"
+                "Ejecuta: venv\\Scripts\\pip install langchain-groq"
+            )
+    else:
+        api_key = os.getenv("OPENAI_API_KEY", "")
+        if not api_key or api_key.startswith("sk-..."):
+            raise EnvironmentError(
+                "OPENAI_API_KEY no configurada.\n"
+                "Pasos:\n"
+                "  1. Copia .env.example como .env\n"
+                "  2. Pon tu clave real de OpenAI\n"
+                "  3. Vuelve a ejecutar"
+            )
 
     # ── 2. Inicializar LLM ───────────────────────────────────────────────────
-    logger.info(f"[Agent] LLM: {LLM_MODEL} | temperatura={LLM_TEMP}")
-    llm = ChatOpenAI(
-        model=LLM_MODEL,
-        temperature=LLM_TEMP,
-        api_key=api_key,
-    )
+    if LLM_PROVIDER == "groq":
+        # Groq: gratis, ultra rapido, modelos Llama 3
+        modelo_groq = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+        logger.info(f"[Agent] LLM: Groq/{modelo_groq} | temperatura={LLM_TEMP}")
+        llm = ChatGroq(
+            model=modelo_groq,
+            temperature=LLM_TEMP,
+            api_key=api_key,
+        )
+    else:
+        # OpenAI (default)
+        logger.info(f"[Agent] LLM: OpenAI/{LLM_MODEL} | temperatura={LLM_TEMP}")
+        llm = ChatOpenAI(
+            model=LLM_MODEL,
+            temperature=LLM_TEMP,
+            api_key=api_key,
+        )
 
     # ── 3. Construir las 4 herramientas ─────────────────────────────────────
     logger.info("[Agent] Inicializando herramientas (tools.py)...")
