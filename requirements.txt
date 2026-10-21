@@ -1,38 +1,27 @@
-# ================================================================
-# PIXELFORGE EP2 — Dependencias
-# ================================================================
-# Instalar en entorno virtual aislado (OBLIGATORIO):
-#
-#   python -m venv venv
-#   venv\Scripts\activate          (Windows)
-#   pip install -r requirements.txt
-#
-# Por qué usar venv: el sistema global tiene versiones mezcladas
-# e incompatibles de langchain. El venv garantiza un ambiente limpio.
-#
-# Las versiones mínimas aquí son los PISOS — pip instalará
-# la versión más reciente compatible automáticamente.
-# ================================================================
+# PixelForge EP2 - Dependencias con versiones exactas probadas
+# Instalar con: venv\Scripts\pip install -r requirements.txt
+# Versiones validadas con Python 3.12.4 en Windows
 
-# --- Ecosistema LangChain (pip resuelve compatibilidad interna) ---
-langchain>=0.3.0
-langchain-openai>=0.3.0
-langchain-community>=0.3.0
-langchain-experimental>=0.3.0
-langchain-text-splitters>=0.3.0
+# ── LangChain 0.3.x ecosystem ─────────────────────────────────────
+langchain==0.3.25
+langchain-core==0.3.66
+langchain-openai==0.3.16
+langchain-community==0.3.25
+langchain-experimental==0.3.4
+langchain-text-splitters==0.3.8
 
-# --- Orquestación con grafo de estados ---
-langgraph>=0.4.0
+# ── LangGraph ─────────────────────────────────────────────────────
+langgraph==0.4.1
 
-# --- LLM base ---
-openai>=1.58.0
+# ── OpenAI ────────────────────────────────────────────────────────
+openai==1.82.0
 
-# --- Vector store para RAG real ---
-faiss-cpu>=1.7.4
+# ── Vector store ──────────────────────────────────────────────────
+faiss-cpu==1.11.0
 
-# --- Datos estructurados CSV ---
-pandas>=2.0.0
+# ── Tabular ───────────────────────────────────────────────────────
+pandas==2.2.3
 tabulate>=0.9.0
 
-# --- Variables de entorno ---
+# ── Utilidades ────────────────────────────────────────────────────
 python-dotenv>=1.0.0
