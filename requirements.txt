@@ -1,0 +1,38 @@
+# ================================================================
+# PIXELFORGE EP2 — Dependencias
+# ================================================================
+# Instalar en entorno virtual aislado (OBLIGATORIO):
+#
+#   python -m venv venv
+#   venv\Scripts\activate          (Windows)
+#   pip install -r requirements.txt
+#
+# Por qué usar venv: el sistema global tiene versiones mezcladas
+# e incompatibles de langchain. El venv garantiza un ambiente limpio.
+#
+# Las versiones mínimas aquí son los PISOS — pip instalará
+# la versión más reciente compatible automáticamente.
+# ================================================================
+
+# --- Ecosistema LangChain (pip resuelve compatibilidad interna) ---
+langchain>=0.3.0
+langchain-openai>=0.3.0
+langchain-community>=0.3.0
+langchain-experimental>=0.3.0
+langchain-text-splitters>=0.3.0
+
+# --- Orquestación con grafo de estados ---
+langgraph>=0.4.0
+
+# --- LLM base ---
+openai>=1.58.0
+
+# --- Vector store para RAG real ---
+faiss-cpu>=1.7.4
+
+# --- Datos estructurados CSV ---
+pandas>=2.0.0
+tabulate>=0.9.0
+
+# --- Variables de entorno ---
+python-dotenv>=1.0.0

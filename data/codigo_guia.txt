@@ -1,0 +1,27 @@
+# Guía de Estándares de Código, Arquitectura y Mejores Prácticas - PixelForge Studios
+
+## 1. Nomenclatura y Convenciones Generales
+- Variables y Funciones: camelCase (ej: \calculateDamage()\, \playerHealth\).
+- Clases y Structs: PascalCase (ej: \EnemyController\, \WeaponStats\).
+- Variables Privadas y Protegidas: Deben iniciar con guion bajo (ej: \_currentMana\).
+- Variables de Estado: Obligatorio el uso de prefijos 'is_', 'has_' o 'can_' (ej: \is_jumping\, \can_attack\).
+
+## 2. Arquitectura de Controladores y Animación
+- Patrón Máquina de Estados (FSM): Todos los personajes (jugador y enemigos) deben heredar de \BaseStateMachine\.
+- Transiciones:
+  - Las transiciones de animación NUNCA deben forzarse asignando variables directamente en el componente de Animator.
+  - Usar los métodos del \AnimationController\: \TryTriggerState(String stateName)\.
+- Prevención de Locks (Glitches): Para evitar que el personaje se quede congelado (ej: transición inválida de Salto a Ataque), SIEMPRE envolver la lógica en \if(!is_in_transition)\. Si el motor de animaciones está en transición entre clips, ignorar nuevos inputs.
+
+## 3. Optimización y Manejo de Memoria
+- Object Pooling Obligatorio: NUNCA usar \Instantiate()\ o \Destroy()\ en tiempo de ejecución para proyectiles, efectos de partículas o enemigos básicos. Usar \ObjectPoolManager.Spawn()\ y \ObjectPoolManager.Despawn()\.
+- Limpieza de Nivel: Al cargar una escena nueva, disparar el evento \OnLevelUnload\ para que el Pool libere memoria. (Mitigación del BUG crónico de fugas de memoria).
+
+## 4. Gestión de Física y Colisiones
+- Usar \FixedUpdate()\ exclusivamente para cálculos de físicas.
+- Las capas (Layers) están estrictamente definidas:
+  - Layer 8: Player
+  - Layer 9: Enemy
+  - Layer 10: Environment
+  - Layer 11: Projectiles
+- Los proyectiles del jugador solo deben colisionar con Layer 9 y 10. No calcular colisiones con Layer 8 (Self-damage) a menos que el diseño lo exija específicamente.
