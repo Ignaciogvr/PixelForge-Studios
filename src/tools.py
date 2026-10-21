@@ -23,7 +23,8 @@ import pandas as pd
 from dotenv import load_dotenv
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain.tools import Tool
+from langchain.tools import Tool, StructuredTool
+from pydantic import BaseModel, Field
 from langchain_community.document_loaders import TextLoader
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import ChatPromptTemplate
@@ -229,102 +230,79 @@ def _crear_agente_pandas(df: pd.DataFrame, nombre: str, llm: ChatOpenAI):
 # BLOQUE 3 — Construcción de las 4 Tools
 # ================================================================
 
+
+# Schema explicito para las tools — evita el problema __arg1 vs arg1
+class _Q(BaseModel):
+    query: str = Field(description="La consulta a realizar")
+
+
 def build_tools(cadena_gdd, cadena_codigo, agente_bugs, agente_balance) -> List[Tool]:
     """
-    Ensambla y retorna las 4 herramientas del agente.
-
-    Diseño de las descripciones:
-    - "USAR CUANDO:" guía al LLM sobre qué tipo de consulta activa esta tool
-    - Incluye ejemplos de consultas válidas para que el LLM aprenda por analogía
-    - "NO usar para:" evita que el LLM elija la tool equivocada
-    - Tools RAG (GDD, código): semánticas -> texto libre, preguntas abiertas
-    - Tools Pandas (bugs, balance): exactas -> datos numéricos o de estado
-
-    Args:
-        cadena_gdd:      cadena LCEL del GDD (create_retrieval_chain)
-        cadena_codigo:   cadena LCEL de la guía de código
-        agente_bugs:     agente Pandas del CSV de Jira
-        agente_balance:  agente Pandas del CSV de Balance
-
-    Returns:
-        List[Tool]: las 4 herramientas listas para conectar al agente
+    Ensambla y retorna las 4 herramientas del agente usando StructuredTool
+    con schema explicito (query: str) para maxima compatibilidad con cualquier LLM.
     """
+    def _make(name, desc, fn):
+        return StructuredTool.from_function(
+            func=fn,
+            name=name,
+            description=desc,
+            args_schema=_Q,
+        )
+
     tools = [
-
-        # ----------------------------------------------------------
-        # TOOL 1: Game Design Document — RAG semántico
-        # ----------------------------------------------------------
-        Tool(
-            name="consultar_GDD",
-            description=(
+        _make(
+            "consultar_GDD",
+            (
                 "USAR CUANDO: la pregunta es sobre el lore del mundo de Aethelgard, "
-                "mecánicas del juego (salto, dash, combate, parry, stamina), "
-                "habilidades activas (Corte Ígneo, Barrera Refractiva, Salto Sísmico), "
+                "mecanicas del juego (salto, dash, combate, parry, stamina), "
+                "habilidades activas (Corte Igneo, Barrera Refractiva, Salto Sismico), "
                 "comportamiento o estrategia de enemigos (Slime Corrupto, Golem de Basalto, "
-                "Lobo Sombrío, Caballero Caído), progresión del personaje, economía "
-                "(Esquirlas de Éter), o cualquier regla de diseño del juego. "
-                "Ejemplos: '¿cómo funciona el parry?', '¿cuál es la estrategia para el Golem?', "
-                "'¿qué estados puede tener el jugador?'. "
-                "NO usar para: consultas de código, bugs de Jira, ni estadísticas numéricas."
+                "Lobo Sombrio, Caballero Caido), progresion del personaje, economia "
+                "(Esquirlas de Eter), o cualquier regla de diseno del juego. "
+                "Ejemplos: 'como funciona el parry?', 'cual es la estrategia para el Golem?'. "
+                "NO usar para: consultas de codigo, bugs de Jira, ni estadisticas numericas."
             ),
-            func=lambda q: _safe_run("consultar_GDD", lambda x: _run_rag(cadena_gdd, x), q),
+            lambda query: _safe_run("consultar_GDD", lambda x: _run_rag(cadena_gdd, x), query),
         ),
-
-        # ----------------------------------------------------------
-        # TOOL 2: Guía de Código — RAG semántico
-        # ----------------------------------------------------------
-        Tool(
-            name="consultar_codigo",
-            description=(
-                "USAR CUANDO: la pregunta es sobre estándares de programación en Unity/C#, "
-                "arquitectura de controladores, máquina de estados (FSM), convenciones de "
-                "nomenclatura (camelCase, PascalCase), manejo de memoria, físicas (FixedUpdate "
-                "vs Update), capas de colisión (Physics Layers), object pooling, prevención de "
-                "glitches de animación, o cómo implementar algo técnico. "
-                "Ejemplos: '¿cómo prevenir un freeze en transición de animación?', "
-                "'¿cuándo usar FixedUpdate?', '¿qué patrón usar para los controladores?'. "
-                "NO usar para: mecánicas de diseño del juego, bugs de Jira, ni estadísticas."
+        _make(
+            "consultar_codigo",
+            (
+                "USAR CUANDO: la pregunta es sobre estandares de programacion en Unity/C#, "
+                "arquitectura de controladores, maquina de estados (FSM), convenciones de "
+                "nomenclatura, manejo de memoria, fisicas, capas de colision, object pooling, "
+                "prevencion de glitches de animacion. "
+                "Ejemplos: 'como prevenir un freeze en transicion de animacion?', "
+                "'cuando usar FixedUpdate?'. "
+                "NO usar para: mecanicas de diseno del juego, bugs de Jira, ni estadisticas."
             ),
-            func=lambda q: _safe_run("consultar_codigo", lambda x: _run_rag(cadena_codigo, x), q),
+            lambda query: _safe_run("consultar_codigo", lambda x: _run_rag(cadena_codigo, x), query),
         ),
-
-        # ----------------------------------------------------------
-        # TOOL 3: Bugs de Jira — Pandas Agent (datos exactos)
-        # ----------------------------------------------------------
-        Tool(
-            name="consultar_bugs",
-            description=(
-                "USAR CUANDO: la pregunta pide información de un ticket de bug: "
-                "estado (Abierto, En Progreso, Resuelto), prioridad (Alta, Media, Baja, Crítica), "
-                "responsable (Assignee), sprint al que pertenece, descripción o pasos "
-                "para reproducir. Puede buscar por ID exacto (PF-1001 a PF-1006) o por "
-                "palabras clave (ej: 'bugs de memoria', 'sprint 12', 'sin asignar'). "
-                "Columnas disponibles: Issue_Key, Summary, Status, Priority, Assignee, "
-                "Sprint, Description, Steps_to_Reproduce. "
-                "Ejemplos: '¿quién tiene asignado PF-1003?', '¿cuántos bugs críticos hay?', "
-                "'¿qué bugs están abiertos en Sprint 12?'. "
-                "NO usar para: mecánicas, código, ni estadísticas de balance."
+        _make(
+            "consultar_bugs",
+            (
+                "USAR CUANDO: la pregunta pide informacion de un ticket de bug: "
+                "estado, prioridad, responsable, sprint, descripcion o pasos para reproducir. "
+                "Busca por ID exacto (PF-1001 a PF-1006) o palabras clave. "
+                "Columnas: Issue_Key, Summary, Status, Priority, Assignee, Sprint, "
+                "Description, Steps_to_Reproduce. "
+                "Ejemplos: 'quien tiene asignado PF-1003?', 'cuantos bugs criticos hay?'. "
+                "NO usar para: mecanicas, codigo, ni estadisticas de balance."
             ),
-            func=lambda q: _safe_run("consultar_bugs", agente_bugs.run, q),
+            lambda query: _safe_run("consultar_bugs", agente_bugs.run, query),
         ),
-
-        # ----------------------------------------------------------
-        # TOOL 4: Balance estadístico — Pandas Agent (datos exactos)
-        # ----------------------------------------------------------
-        Tool(
-            name="consultar_balance",
-            description=(
-                "USAR CUANDO: la pregunta requiere valores numéricos exactos de personajes "
+        _make(
+            "consultar_balance",
+            (
+                "USAR CUANDO: la pregunta requiere valores numericos exactos de personajes "
                 "o enemigos: HP_Base, Mana_Base, Stamina, Move_Speed, Attack_Base, Def_Base, "
                 "Crit_Chance o Crit_Multiplier. "
-                "Entidades disponibles — jugadores: Arquero_Viento, Guerrero_Tierra, Mago_Fuego; "
-                "enemigos: Slime_Corrupto, Lobo_Sombrio, Golem_Basalto, Caballero_Caido. "
-                "Ejemplos: '¿cuánto HP tiene el Golem de Basalto?', "
-                "'¿qué personaje tiene mayor daño base?', "
-                "'¿cuál es la probabilidad de crítico del Lobo Sombrío?'. "
-                "NO usar para: lore del juego, bugs de Jira, ni código."
+                "Jugadores: Arquero_Viento, Guerrero_Tierra, Mago_Fuego. "
+                "Enemigos: Slime_Corrupto, Lobo_Sombrio, Golem_Basalto, Caballero_Caido. "
+                "Ejemplos: 'cuanto HP tiene el Golem de Basalto?', "
+                "'que personaje tiene mayor dano base?'. "
+                "NO usar para: lore del juego, bugs de Jira, ni codigo."
             ),
-            func=lambda q: _safe_run("consultar_balance", agente_balance.run, q),
+            lambda query: _safe_run("consultar_balance", agente_balance.run, query),
         ),
     ]
 
