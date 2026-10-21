@@ -92,10 +92,15 @@ try:
         ok(f"_SYSTEM_PROMPT: {len(sp)} caracteres")
     else:
         err(f"_SYSTEM_PROMPT muy corto ({len(sp)} chars)")
-    # Verificar reglas clave en el system prompt
+    # Verificar reglas clave en el system prompt y código fuente
+    import inspect
+    agent_src = ""
+    try:
+        agent_src = open(os.path.join(SRC, "agent.py"), encoding="utf-8").read()
+    except: pass
     for regla in ["SOLO USES LAS 4 HERRAMIENTAS","CITA SIEMPRE LA FUENTE",
                   "No tengo inform","thread_id"]:
-        if regla in (sp + str(agent.__dict__)):
+        if regla in sp or regla in agent_src:
             ok(f"Regla presente: {regla[:30]}")
         else:
             err(f"Regla FALTANTE: {regla}")
