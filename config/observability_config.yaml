@@ -1,0 +1,96 @@
+# ================================================================
+# CONFIGURACIÓN DEL SISTEMA DE OBSERVABILIDAD
+# ================================================================
+# Archivo de configuración empresarial para personalizar comportamiento
+# del sistema de monitoreo sin modificar código.
+
+# Umbrales de alertas
+thresholds:
+  # Métricas de calidad
+  precision_min: 70.0           # % mínimo de precisión aceptable
+  consistencia_min: 70.0        # % mínimo de consistencia
+  error_rate_max: 10.0          # % máximo de errores tolerado
+  
+  # Métricas de rendimiento
+  latencia_max: 5.0             # segundos máximos de latencia
+  latencia_p95_max: 8.0         # P95 máximo de latencia
+  
+  # Métricas de recursos
+  cpu_max: 80.0                 # % máximo de CPU
+  ram_max: 2048                 # MB máximo de RAM
+
+# Configuración de retención
+retention:
+  metrics_window_size: 1000     # Últimas N consultas en memoria
+  log_retention_days: 30        # Días de retención de logs
+  export_interval_minutes: 5    # Intervalo de exportación automática
+
+# Configuración de caché
+cache:
+  enabled: true
+  max_size: 100                 # Número máximo de entradas
+  ttl_seconds: 300              # Time-to-live de entradas (5 min)
+
+# Sistema de alertas
+alerting:
+  enabled: true
+  check_interval: 5             # Verificar umbrales cada N consultas
+  channels:
+    - log                       # Siempre activo
+    # - email                   # Descomentar para activar
+    # - slack                   # Descomentar para activar
+  
+  # Configuración de email (si está activo)
+  email:
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+    from: "alertas@pixelforge.com"
+    to: ["equipo@pixelforge.com"]
+  
+  # Configuración de Slack (si está activo)
+  slack:
+    webhook_url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+
+# Exportación de métricas
+export:
+  formats:
+    - json                      # Formato por defecto
+    # - csv                     # Descomentar para activar
+    # - prometheus              # Descomentar para activar
+  
+  paths:
+    json: "logs/metrics.json"
+    csv: "logs/metrics.csv"
+    prometheus: "logs/metrics.prom"
+    logs: "logs/log_analysis.json"
+
+# Logging
+logging:
+  level: "INFO"                 # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "structured"          # simple, structured, json
+  file: "logs/monitoring.log"
+  max_file_size_mb: 10
+  backup_count: 5
+
+# Dashboard
+dashboard:
+  port: 8501
+  host: "localhost"
+  refresh_interval_seconds: 5   # Auto-refresh del dashboard
+  theme: "light"                # light, dark
+
+# Métricas personalizadas
+custom_metrics:
+  enabled: true
+  track_tool_usage: true        # Rastrear uso de cada tool
+  track_thread_performance: true # Métricas por thread
+  track_escenarios: true        # Métricas por escenario
+
+# Modo de operación
+mode: "production"              # development, production, testing
+
+# Features experimentales
+experimental:
+  ml_classification: false      # Usar ML para clasificar respuestas
+  anomaly_detection: false      # Detección de anomalías con ML
+  predictive_alerts: false      # Alertas predictivas

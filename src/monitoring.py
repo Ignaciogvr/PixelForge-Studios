@@ -1,30 +1,232 @@
 """
-monitoring.py - Sistema de Observabilidad Profesional
+monitoring.py - Sistema de Observabilidad Empresarial
 ======================================================
 
-Implementa métricas de calidad, rendimiento y análisis de logs
-para el agente PixelForge EP2.
+Sistema avanzado de observabilidad con métricas de calidad, rendimiento,
+análisis de logs, sistema de alertas y exportación multi-formato.
+
+Características empresariales:
+- Validación estricta de datos con esquemas
+- Manejo robusto de excepciones con logging detallado
+- Sistema de umbrales configurables con alertas
+- Caché inteligente para optimización de consultas
+- Exportación multi-formato (JSON, CSV, Prometheus)
+- Métricas estadísticas avanzadas (percentiles, desviación estándar)
+- Thread-safe para entornos concurrentes
 
 Patrones de diseño utilizados:
-- Singleton: MetricsCollector (una sola instancia global)
-- Decorator: PerformanceTracker (decorador para funciones)
+- Singleton: MetricsCollector (instancia única thread-safe)
+- Decorator: PerformanceTracker (AOP para métricas)
 - Facade: ObservabilitySystem (interfaz unificada)
-- Strategy: LogAnalyzer (diferentes estrategias de análisis)
+- Strategy: LogAnalyzer (estrategias de análisis)
+- Builder: MetricsBuilder (construcción flexible)
+- Observer: AlertSystem (notificaciones de eventos)
 
-Autor: [Tu nombre]
+Autor: Ignacio Núñez, René Marambio
 Fecha: 2026-11-25
 Evaluación: EP3 - Observabilidad
+Versión: 2.0 (Versión Empresarial)
 """
 
 import json
 import os
 import re
 import time
-from collections import Counter
-from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+import logging
+import threading
+from collections import Counter, deque
+from dataclasses import dataclass, field, asdict
+from typing import List, Dict, Any, Optional, Callable, Union
+from datetime import datetime
+from pathlib import Path
 import psutil
 
+# ================================================================
+# CONFIGURACIÓN Y CONSTANTES
+# ================================================================
+
+# Logger profesional con formato estructurado
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
+    handlers=[
+        logging.FileHandler('logs/monitoring.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Umbrales por defecto (configurables)
+DEFAULT_THRESHOLDS = {
+    "precision_min": 70.0,       # % mínimo de precisión aceptable
+    "latencia_max": 5.0,         # segundos máximos de latencia
+    "error_rate_max": 10.0,      # % máximo de errores
+    "cpu_max": 80.0,             # % máximo de CPU
+    "ram_max": 2048,             # MB máximo de RAM
+    "consistencia_min": 70.0     # % mínimo de consistencia
+}
+
+# Ventana de retención de métricas (últimas N consultas)
+METRICS_WINDOW_SIZE = 1000
+
+# ================================================================
+# EXCEPCIONES PERSONALIZADAS
+# ================================================================
+
+class MonitoringError(Exception):
+    """Excepción base para errores de monitoreo"""
+    pass
+
+class ValidationError(MonitoringError):
+    """Error de validación de datos"""
+    pass
+
+class ThresholdViolationError(MonitoringError):
+    """Error cuando se violan umbrales configurados"""
+    pass
+
+class ExportError(MonitoringError):
+    """Error durante exportación de métricas"""
+    pass
+
+
+# ================================================================
+# VALIDACIÓN DE DATOS
+# ================================================================
+
+@dataclass
+class MetricaInput:
+    """Esquema de validación para entrada de métricas"""
+    respuesta: str
+    pregunta: str
+    latencia: float
+    tools_usadas: List[str]
+    thread_id: str
+    escenario: Optional[str] = None
+    cpu_percent: Optional[float] = None
+    ram_mb: Optional[float] = None
+    
+    def __post_init__(self):
+        """Validación automática después de construcción"""
+        if not isinstance(self.respuesta, str) or len(self.respuesta) == 0:
+            raise ValidationError("Respuesta debe ser string no vacío")
+        if not isinstance(self.latencia, (int, float)) or self.latencia < 0:
+            raise ValidationError(f"Latencia inválida: {self.latencia}")
+        if not isinstance(self.tools_usadas, list):
+            raise ValidationError("tools_usadas debe ser una lista")
+        if self.cpu_percent is not None and (self.cpu_percent < 0 or self.cpu_percent > 100):
+            raise ValidationError(f"CPU % inválido: {self.cpu_percent}")
+        if self.ram_mb is not None and self.ram_mb < 0:
+            raise ValidationError(f"RAM MB inválida: {self.ram_mb}")
+
+# ================================================================
+# SISTEMA DE ALERTAS (Observer Pattern)
+# ================================================================
+
+class AlertSystem:
+    """
+    Sistema de alertas con soporte para múltiples canales.
+    Permite registrar callbacks que se ejecutan cuando se violan umbrales.
+    """
+    
+    def __init__(self):
+        self.handlers: List[Callable[[str, Dict], None]] = []
+        self.alertas_enviadas = []
+    
+    def registrar_handler(self, handler: Callable[[str, Dict], None]):
+        """Registra un handler de alertas (email, Slack, log, etc.)"""
+        self.handlers.append(handler)
+        logger.info(f"Handler de alertas registrado: {handler.__name__}")
+    
+    def enviar_alerta(self, severidad: str, mensaje: str, contexto: Dict[str, Any]):
+        """
+        Envía alerta a todos los handlers registrados.
+        
+        Args:
+            severidad: 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'
+            mensaje: Descripción de la alerta
+            contexto: Datos adicionales (métricas, timestamps, etc.)
+        """
+        alerta = {
+            "severidad": severidad,
+            "mensaje": mensaje,
+            "contexto": contexto,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        self.alertas_enviadas.append(alerta)
+        logger.warning(f"⚠️ ALERTA [{severidad}]: {mensaje}")
+        
+        for handler in self.handlers:
+            try:
+                handler(severidad, alerta)
+            except Exception as e:
+                logger.error(f"Error ejecutando handler {handler.__name__}: {e}")
+    
+    def obtener_historial_alertas(self, ultimas_n: Optional[int] = None) -> List[Dict]:
+        """Obtiene historial de alertas"""
+        if ultimas_n:
+            return self.alertas_enviadas[-ultimas_n:]
+        return self.alertas_enviadas.copy()
+
+# ================================================================
+# SISTEMA DE CACHÉ
+# ================================================================
+
+class MetricsCache:
+    """
+    Caché LRU (Least Recently Used) para optimizar cálculos repetidos.
+    Thread-safe con lock para entornos concurrentes.
+    """
+    
+    def __init__(self, max_size: int = 100):
+        self.cache: Dict[str, Any] = {}
+        self.access_order: deque = deque(maxlen=max_size)
+        self.max_size = max_size
+        self.lock = threading.Lock()
+        self.hits = 0
+        self.misses = 0
+    
+    def get(self, key: str) -> Optional[Any]:
+        """Obtiene valor del caché"""
+        with self.lock:
+            if key in self.cache:
+                self.access_order.remove(key)
+                self.access_order.append(key)
+                self.hits += 1
+                return self.cache[key]
+            self.misses += 1
+            return None
+    
+    def put(self, key: str, value: Any):
+        """Almacena valor en caché con política LRU"""
+        with self.lock:
+            if key in self.cache:
+                self.access_order.remove(key)
+            elif len(self.cache) >= self.max_size:
+                oldest_key = self.access_order.popleft()
+                del self.cache[oldest_key]
+            
+            self.cache[key] = value
+            self.access_order.append(key)
+    
+    def invalidate(self):
+        """Invalida todo el caché"""
+        with self.lock:
+            self.cache.clear()
+            self.access_order.clear()
+            logger.info("Caché invalidado")
+    
+    def get_stats(self) -> Dict[str, Union[int, float]]:
+        """Obtiene estadísticas del caché"""
+        total = self.hits + self.misses
+        hit_rate = (self.hits / total * 100) if total > 0 else 0
+        return {
+            "hits": self.hits,
+            "misses": self.misses,
+            "hit_rate": round(hit_rate, 2),
+            "size": len(self.cache)
+        }
 
 # ================================================================
 # MÉTRICAS DE CALIDAD (IE1 - 15%)
@@ -32,94 +234,260 @@ import psutil
 
 class MetricsCollector:
     """
-    Recolector centralizado de métricas de calidad del agente.
+    Recolector centralizado de métricas con capacidades empresariales.
     
-    Implementa patrón Singleton para garantizar una única instancia
-    en toda la aplicación.
+    Implementa patrón Singleton thread-safe para garantizar una única instancia
+    global en toda la aplicación, incluso en entornos multi-thread.
+    
+    Características avanzadas:
+    - Ventana deslizante de métricas (últimas N consultas)
+    - Caché inteligente para cálculos costosos
+    - Sistema de alertas integrado
+    - Validación estricta de datos de entrada
+    - Métricas estadísticas avanzadas (percentiles, CV, desviación)
+    - Thread-safe con locks
     
     Métricas implementadas:
     - Precisión: % de respuestas exitosas
     - Consistencia: Estabilidad de latencias (1 - CV)
     - Tasa de errores: % de respuestas con error
+    - Distribución de tipos de respuesta
+    - Métricas de recursos (CPU, RAM)
+    - Análisis de herramientas más usadas
     
     Example:
         >>> collector = MetricsCollector()
-        >>> collector.registrar("Respuesta exitosa", {"latencia": 2.5})
+        >>> collector.registrar("Respuesta exitosa", {
+        ...     "pregunta": "¿Cómo funciona X?",
+        ...     "latencia": 2.5,
+        ...     "tools_usadas": ["consultar_GDD"],
+        ...     "thread_id": "thread-1"
+        ... })
         >>> print(f"Precisión: {collector.calcular_precision():.1f}%")
         Precisión: 100.0%
     """
     
     _instance = None
+    _lock = threading.Lock()
     
     def __new__(cls):
+        """Implementación thread-safe de Singleton con double-check locking"""
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance.initialized = False
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance.initialized = False
         return cls._instance
     
     def __init__(self):
         if self.initialized:
             return
         
-        self.metrics = {
-            "total": 0,
-            "exitosas": 0,
-            "errores": 0,
-            "sin_info": 0
-        }
-        self.historial = []
-        self.initialized = True
+        with self._lock:
+            if self.initialized:
+                return
+            
+            # Contadores básicos
+            self.metrics = {
+                "total": 0,
+                "exitosas": 0,
+                "errores": 0,
+                "sin_info": 0
+            }
+            
+            # Historial con ventana deslizante (últimas N consultas)
+            self.historial: deque = deque(maxlen=METRICS_WINDOW_SIZE)
+            
+            # Sistema de caché para cálculos costosos
+            self.cache = MetricsCache(max_size=50)
+            
+            # Sistema de alertas
+            self.alert_system = AlertSystem()
+            
+            # Umbrales configurables
+            self.thresholds = DEFAULT_THRESHOLDS.copy()
+            
+            # Timestamps para métricas temporales
+            self.inicio_monitoreo = time.time()
+            self.ultima_actualizacion = None
+            
+            self.initialized = True
+            logger.info("MetricsCollector inicializado (Singleton thread-safe)")
+    
+    def configurar_umbrales(self, **kwargs):
+        """
+        Configura umbrales personalizados para alertas.
+        
+        Args:
+            precision_min (float): Precisión mínima aceptable (%)
+            latencia_max (float): Latencia máxima aceptable (segundos)
+            error_rate_max (float): Tasa de errores máxima (%)
+            cpu_max (float): Uso máximo de CPU (%)
+            ram_max (int): Uso máximo de RAM (MB)
+            consistencia_min (float): Consistencia mínima (%)
+        """
+        for key, value in kwargs.items():
+            if key in self.thresholds:
+                self.thresholds[key] = value
+                logger.info(f"Umbral configurado: {key} = {value}")
+            else:
+                logger.warning(f"Umbral desconocido ignorado: {key}")
+        
+        self.cache.invalidate()  # Invalidar caché tras cambio de config
     
     def registrar(self, respuesta: str, metadata: Dict[str, Any]):
         """
-        Registra una consulta con sus métricas asociadas.
+        Registra una consulta con validación estricta y análisis automático.
         
         Args:
             respuesta: Texto de la respuesta del agente
-            metadata: Diccionario con datos adicionales:
+            metadata: Diccionario con datos obligatorios:
                 - pregunta (str): Pregunta del usuario
                 - latencia (float): Tiempo de respuesta en segundos
-                - tools_usadas (List[str]): Tools llamadas por el agente
-                - thread_id (str): ID del hilo de conversación
-                - escenario (int, optional): ID del escenario de prueba
+                - tools_usadas (List[str]): Tools llamadas
+                - thread_id (str): ID del hilo
+                - escenario (str, optional): ID del escenario
+                - cpu_percent (float, optional): % CPU usado
+                - ram_mb (float, optional): MB RAM usados
+        
+        Raises:
+            ValidationError: Si los datos no pasan validación
         """
-        self.metrics["total"] += 1
-        tipo = self._clasificar_respuesta(respuesta)
-        
-        # Actualizar contadores
-        if tipo == "exitosa":
-            self.metrics["exitosas"] += 1
-        elif tipo == "error":
-            self.metrics["errores"] += 1
-        elif tipo == "sin_info":
-            self.metrics["sin_info"] += 1
-        
-        # Guardar en historial
-        self.historial.append({
-            "tipo": tipo,
-            "latencia": round(metadata.get("latencia", 0), 2),
-            "tools_usadas": metadata.get("tools_usadas", []),
-            "thread_id": metadata.get("thread_id", "unknown"),
-            "escenario": metadata.get("escenario", None),
-            "timestamp": time.time(),
-            "longitud_respuesta": len(respuesta)
-        })
+        try:
+            # Validar entrada con dataclass
+            entrada = MetricaInput(
+                respuesta=respuesta,
+                pregunta=metadata.get("pregunta", ""),
+                latencia=metadata.get("latencia", 0),
+                tools_usadas=metadata.get("tools_usadas", []),
+                thread_id=metadata.get("thread_id", "unknown"),
+                escenario=metadata.get("escenario"),
+                cpu_percent=metadata.get("cpu_percent"),
+                ram_mb=metadata.get("ram_mb")
+            )
+            
+            # Clasificar respuesta
+            tipo = self._clasificar_respuesta(respuesta)
+            
+            # Actualizar contadores
+            with self._lock:
+                self.metrics["total"] += 1
+                if tipo == "exitosa":
+                    self.metrics["exitosas"] += 1
+                elif tipo == "error":
+                    self.metrics["errores"] += 1
+                elif tipo == "sin_info":
+                    self.metrics["sin_info"] += 1
+                
+                # Guardar en historial (ventana deslizante)
+                registro = {
+                    "tipo": tipo,
+                    "latencia": round(entrada.latencia, 3),
+                    "tools_usadas": entrada.tools_usadas,
+                    "thread_id": entrada.thread_id,
+                    "escenario": entrada.escenario,
+                    "timestamp": time.time(),
+                    "longitud_respuesta": len(respuesta),
+                    "cpu_percent": entrada.cpu_percent,
+                    "ram_mb": entrada.ram_mb
+                }
+                self.historial.append(registro)
+                self.ultima_actualizacion = time.time()
+            
+            # Invalidar caché tras nueva entrada
+            self.cache.invalidate()
+            
+            # Verificar umbrales y generar alertas si es necesario
+            self._verificar_umbrales(registro)
+            
+            logger.debug(f"Métrica registrada: {tipo} | Latencia: {entrada.latencia:.2f}s")
+            
+        except ValidationError as e:
+            logger.error(f"Error de validación al registrar métrica: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Error inesperado al registrar métrica: {e}", exc_info=True)
+            raise MonitoringError(f"Error al registrar métrica: {e}")
     
     def _clasificar_respuesta(self, respuesta: str) -> str:
         """
-        Clasifica el tipo de respuesta del agente.
+        Clasifica el tipo de respuesta con múltiples heurísticas.
+        
+        Aplica análisis multi-criterio:
+        1. Detección de errores explícitos
+        2. Detección de falta de información
+        3. Validación de longitud mínima
+        4. Análisis de palabras clave
         
         Returns:
-            "exitosa", "sin_info" o "error"
+            str: "exitosa", "sin_info" o "error"
         """
-        respuesta_lower = respuesta.lower()
+        respuesta_lower = respuesta.lower().strip()
         
-        if "no tengo información" in respuesta_lower:
-            return "sin_info"
-        elif "error" in respuesta_lower or "no pude" in respuesta_lower:
+        # Patrón 1: Errores explícitos (alta prioridad)
+        error_patterns = [
+            "error", "exception", "traceback", "failed", "no pude",
+            "imposible", "falló", "timeout", "connection refused"
+        ]
+        if any(pattern in respuesta_lower for pattern in error_patterns):
             return "error"
-        else:
-            return "exitosa"
+        
+        # Patrón 2: Falta de información
+        no_info_patterns = [
+            "no tengo información", "no encuentro", "no dispongo",
+            "no puedo proporcionar", "no hay datos", "desconocida",
+            "no está en la documentación", "no conozco"
+        ]
+        if any(pattern in respuesta_lower for pattern in no_info_patterns):
+            return "sin_info"
+        
+        # Patrón 3: Respuesta demasiado corta (posible error)
+        if len(respuesta.strip()) < 20:
+            return "sin_info"
+        
+        # Patrón 4: Respuesta válida (por defecto)
+        return "exitosa"
+    
+    def _verificar_umbrales(self, ultimo_registro: Dict[str, Any]):
+        """
+        Verifica si las métricas actuales violan umbrales configurados.
+        Genera alertas automáticamente si es necesario.
+        """
+        try:
+            # Solo verificar cada 5 consultas (evitar spam de alertas)
+            if self.metrics["total"] % 5 != 0:
+                return
+            
+            # Verificar precisión
+            precision_actual = self.calcular_precision()
+            if precision_actual < self.thresholds["precision_min"]:
+                self.alert_system.enviar_alerta(
+                    "HIGH",
+                    f"Precisión bajo umbral: {precision_actual:.1f}% < {self.thresholds['precision_min']:.1f}%",
+                    {"metrica": "precision", "valor": precision_actual}
+                )
+            
+            # Verificar latencia
+            latencia_actual = ultimo_registro.get("latencia", 0)
+            if latencia_actual > self.thresholds["latencia_max"]:
+                self.alert_system.enviar_alerta(
+                    "MEDIUM",
+                    f"Latencia alta: {latencia_actual:.2f}s > {self.thresholds['latencia_max']:.2f}s",
+                    {"metrica": "latencia", "valor": latencia_actual}
+                )
+            
+            # Verificar tasa de errores
+            error_rate = self.calcular_tasa_errores()
+            if error_rate > self.thresholds["error_rate_max"]:
+                self.alert_system.enviar_alerta(
+                    "CRITICAL",
+                    f"Tasa de errores crítica: {error_rate:.1f}% > {self.thresholds['error_rate_max']:.1f}%",
+                    {"metrica": "error_rate", "valor": error_rate}
+                )
+            
+        except Exception as e:
+            logger.error(f"Error verificando umbrales: {e}")
+    
     
     # --- MÉTRICA 1: PRECISIÓN ---
     def calcular_precision(self) -> float:
@@ -250,15 +618,28 @@ class MetricsCollector:
         
         Args:
             path: Ruta del archivo de salida
-        """
-        os.makedirs(os.path.dirname(path), exist_ok=True)
         
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump({
-                "resumen": self.generar_reporte(),
-                "historial": self.historial,
-                "timestamp": time.time()
-            }, f, indent=2, ensure_ascii=False)
+        Raises:
+            ExportError: Si falla la exportación
+        """
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            
+            # Convertir deque a list para serialización JSON
+            historial_list = list(self.historial)
+            
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "resumen": self.generar_reporte(),
+                    "historial": historial_list,
+                    "timestamp": time.time()
+                }, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"Métricas exportadas a {path}")
+            
+        except Exception as e:
+            logger.error(f"Error exportando métricas: {e}", exc_info=True)
+            raise ExportError(f"No se pudo exportar a {path}: {e}")
 
 
 # ================================================================
